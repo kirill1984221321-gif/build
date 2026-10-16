@@ -26,16 +26,22 @@ jobs:
           cp -R /tmp/megacmd_mnt/MEGAcmd.app /tmp/MEGAcmd_app/
           hdiutil detach /tmp/megacmd_mnt
           echo "/tmp/MEGAcmd_app/MEGAcmd.app/Contents/MacOS" >> $GITHUB_PATH
-          /tmp/MEGAcmd_app/MEGAcmd.app/Contents/MacOS/mega-cmd --version
-          ls -lh /tmp/MEGAcmd_app/MEGAcmd.app/Contents/Frameworks/ | head
+          ls -lh /tmp/MEGAcmd_app/MEGAcmd.app/Contents/MacOS/
+          test -x /tmp/MEGAcmd_app/MEGAcmd.app/Contents/MacOS/mega-login && echo "mega-login OK"
+          test -x /tmp/MEGAcmd_app/MEGAcmd.app/Contents/MacOS/mega-get && echo "mega-get OK"
+          test -x /tmp/MEGAcmd_app/MEGAcmd.app/Contents/MacOS/mega-put && echo "mega-put OK"
+          test -x /tmp/MEGAcmd_app/MEGAcmd.app/Contents/MacOS/mega-cmd-server && echo "mega-cmd-server OK"
 
       - name: Download iphone-save from MEGA
         env:
           MEGA_EMAIL: ${{ secrets.MEGA_EMAIL }}
           MEGA_PASSWORD: ${{ secrets.MEGA_PASSWORD }}
         run: |
-          mega-login "$MEGA_EMAIL" "$MEGA_PASSWORD"
-          mega-get /iphone-save.tar.gz
+          MEGA_BIN=/tmp/MEGAcmd_app/MEGAcmd.app/Contents/MacOS
+          "$MEGA_BIN/mega-cmd-server" &
+          sleep 5
+          "$MEGA_BIN/mega-login" "$MEGA_EMAIL" "$MEGA_PASSWORD"
+          "$MEGA_BIN/mega-get" /iphone-save.tar.gz
           ls -lh iphone-save.tar.gz
           tar --sparse -xzf iphone-save.tar.gz
           ls -lh root
@@ -65,6 +71,7 @@ jobs:
           MEGA_EMAIL: ${{ secrets.MEGA_EMAIL }}
           MEGA_PASSWORD: ${{ secrets.MEGA_PASSWORD }}
         run: |
-          mega-login "$MEGA_EMAIL" "$MEGA_PASSWORD"
-          mega-put /tmp/iphone-patched.tar.gz /iphone-patched.tar.gz
-          mega-ls /
+          MEGA_BIN=/tmp/MEGAcmd_app/MEGAcmd.app/Contents/MacOS
+          "$MEGA_BIN/mega-login" "$MEGA_EMAIL" "$MEGA_PASSWORD"
+          "$MEGA_BIN/mega-put" /tmp/iphone-patched.tar.gz /iphone-patched.tar.gz
+          "$MEGA_BIN/mega-ls" /
