@@ -21,12 +21,13 @@ jobs:
       - name: Install MEGAcmd from DMG
         run: |
           curl -fL -o /tmp/MEGAcmdSetup.dmg https://mega.nz/MEGAcmdSetup.dmg
-          hdiutil attach /tmp/MEGAcmdSetup.dmg -nobrowse -mountpoint /tmp/megacmd
-          sudo cp /tmp/megacmd/MEGAcmd.app/Contents/MacOS/mega-* /usr/local/bin/
-          sudo chmod +x /usr/local/bin/mega-*
-          hdiutil detach /tmp/megacmd
-          which mega-login mega-get mega-put mega-cmd
-          mega-cmd --version
+          mkdir -p /tmp/MEGAcmd_app
+          hdiutil attach /tmp/MEGAcmdSetup.dmg -nobrowse -mountpoint /tmp/megacmd_mnt
+          cp -R /tmp/megacmd_mnt/MEGAcmd.app /tmp/MEGAcmd_app/
+          hdiutil detach /tmp/megacmd_mnt
+          echo "/tmp/MEGAcmd_app/MEGAcmd.app/Contents/MacOS" >> $GITHUB_PATH
+          /tmp/MEGAcmd_app/MEGAcmd.app/Contents/MacOS/mega-cmd --version
+          ls -lh /tmp/MEGAcmd_app/MEGAcmd.app/Contents/Frameworks/ | head
 
       - name: Download iphone-save from MEGA
         env:
