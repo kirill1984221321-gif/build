@@ -26,11 +26,9 @@ jobs:
           cp -R /tmp/megacmd_mnt/MEGAcmd.app /tmp/MEGAcmd_app/
           hdiutil detach /tmp/megacmd_mnt
           echo "/tmp/MEGAcmd_app/MEGAcmd.app/Contents/MacOS" >> $GITHUB_PATH
-          ls -lh /tmp/MEGAcmd_app/MEGAcmd.app/Contents/MacOS/
           test -x /tmp/MEGAcmd_app/MEGAcmd.app/Contents/MacOS/mega-login && echo "mega-login OK"
           test -x /tmp/MEGAcmd_app/MEGAcmd.app/Contents/MacOS/mega-get && echo "mega-get OK"
           test -x /tmp/MEGAcmd_app/MEGAcmd.app/Contents/MacOS/mega-put && echo "mega-put OK"
-          test -x /tmp/MEGAcmd_app/MEGAcmd.app/Contents/MacOS/mega-cmd-server && echo "mega-cmd-server OK"
 
       - name: Download iphone-save from MEGA
         env:
@@ -38,8 +36,6 @@ jobs:
           MEGA_PASSWORD: ${{ secrets.MEGA_PASSWORD }}
         run: |
           MEGA_BIN=/tmp/MEGAcmd_app/MEGAcmd.app/Contents/MacOS
-          "$MEGA_BIN/mega-cmd-server" &
-          sleep 5
           "$MEGA_BIN/mega-login" "$MEGA_EMAIL" "$MEGA_PASSWORD"
           "$MEGA_BIN/mega-get" /iphone-save.tar.gz
           ls -lh iphone-save.tar.gz
