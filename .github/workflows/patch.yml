@@ -5,69 +5,193 @@ on: workflow_dispatch
 jobs:
   patch:
     runs-on: macos-14
-    timeout-minutes: 120
+    timeout-minutes: 180
 
     steps:
+      - name: Show environment
+        run: |
+          echo "=== Disk space ==="
+          df -h
+          echo "=== Working dir ==="
+          pwd
+          ls -la
+          echo "=== GITHUB_WORKSPACE=$GITHUB_WORKSPACE ==="
+
       - name: Download pre-built patcher from release
         run: |
+          set -e
           mkdir -p patcher
-          curl -fL -o patcher/inferno_fs_patcher.zip \
-            https://github.com/kirill1984221321-gif/build/releases/download/1/inferno_fs_patcher.zip
+          for i in 1 2 3; do
+            curl -fL --retry 3 --retry-delay 5 \
+              -o patcher/inferno_fs_patcher.zip \
+              https://github.com/kirill1984221321-gif/build/releases/download/1/inferno_fs_patcher.zip && break
+            echo "Attempt $i failed, waiting 5s..."
+            sleep 5
+          done
           cd patcher
           unzip -o inferno_fs_patcher.zip
-          file inferno_fs_patcher
-          chmod +x inferno_fs_patcher
+          echo "=== Extracted files ==="
+          ls -la
+          # Ищем бинарник в корне или во вложенной папке
+          PATCHER_BIN=$(find . -name inferno_fs_patcher -type f | head -1)
+          if [ -z "$PATCHER_BIN" ]; then
+            echo "ERROR: inferno_fs_patcher binary not found in archive"
+            find . -type f
+            exit 1
+          fi
+          echo "Found patcher: $PATCHER_BIN"
+          cp "$PATCHER_BIN" ./inferno_fs_patcher
+          file ./inferno_fs_patcher
+          chmod +x ./inferno_fs_patcher
 
-      - name: Install MEGAcmd from DMG
+      - name: Install megatools
         run: |
-          curl -fL -o /tmp/MEGAcmdSetup.dmg https://mega.nz/MEGAcmdSetup.dmg
-          mkdir -p /tmp/MEGAcmd_app
-          hdiutil attach /tmp/MEGAcmdSetup.dmg -nobrowse -mountpoint /tmp/megacmd_mnt
-          cp -R /tmp/megacmd_mnt/MEGAcmd.app /tmp/MEGAcmd_app/
-          hdiutil detach /tmp/megacmd_mnt
-          echo "/tmp/MEGAcmd_app/MEGAcmd.app/Contents/MacOS" >> $GITHUB_PATH
-          test -x /tmp/MEGAcmd_app/MEGAcmd.app/Contents/MacOS/mega-login && echo "mega-login OK"
-          test -x /tmp/MEGAcmd_app/MEGAcmd.app/Contents/MacOS/mega-get && echo "mega-get OK"
-          test -x /tmp/MEGAcmd_app/MEGAcmd.app/Contents/MacOS/mega-put && echo "mega-put OK"
+          set -e
+          brew install megatools
 
-      - name: Download iphone-save from MEGA
-        env:
-          MEGA_EMAIL: ${{ secrets.MEGA_EMAIL }}
-          MEGA_PASSWORD: ${{ secrets.MEGA_PASSWORD }}
+      - name: Download iphone-save from MEGA public link
         run: |
-          MEGA_BIN=/tmp/MEGAcmd_app/MEGAcmd.app/Contents/MacOS
-          "$MEGA_BIN/mega-login" "$MEGA_EMAIL" "$MEGA_PASSWORD"
-          "$MEGA_BIN/mega-get" /iphone-save.tar.gz
+          set -e
+          mkdir -p /tmp/megadl
+          cd /tmp/megadl
+          MEGA_URL="https://mega.nz/file/TaBHyA6J#SiPWdjPBg9DJCl4m5mU3PKejB4Ot3-XXEVHRwDMAdBc"
+
+          for i in 1 2 3; do
+            echo "=== Attempt $i: megadl ==="
+            if megadl "$MEGA_URL"; then
+              break
+            fi
+            echo "megadl failed, waiting 15s before retry..."
+            sleep 15
+          done
+
+          echo "=== Files after download ==="
+          ls -lh
+
+          # Переименовать в каноничное имя, если MEGA вернула другое
+          if [ ! -f iphone-save.tar.gz ]; then
+            FOUND=$(ls *.tar.gz 2>/dev/null | head -1)
+            if [ -z "$FOUND" ]; then
+              echo "ERROR: no .tar.gz file found after megadl"
+              ls -la
+              exit 1
+            fi
+            mv "$FOUND" iphone-save.tar.gz
+          fi
+
           ls -lh iphone-save.tar.gz
+
+          # Проверка размера
+          SIZE=$(stat -f%z iphone-save.tar.gz)
+          echo "Archive size: $SIZE bytes"
+          if [ "$SIZE" -lt 1000000000 ]; then
+            echo "ERROR: archive smaller than 1GB, likely corrupted"
+            exit 1
+          fi
+
+          echo "=== Extracting archive ==="
           tar --sparse -xzf iphone-save.tar.gz
-          ls -lh root
+
+          echo "=== Files after extract ==="
+          ls -lh
+
+          if [ ! -f root ]; then
+            echo "ERROR: root file not found after extraction"
+            exit 1
+          fi
+          echo "root found: $(ls -lh root)"
 
       - name: Mount APFS root
         run: |
-          hdiutil attach -imagekey diskimage-class=CRawDiskImage -blocksize 4096 -noverify -noautofsck ./root
+          set -e
+          cd /tmp/megadl
+
+          echo "=== Attaching raw image ==="
+          hdiutil attach -imagekey diskimage-class=CRawDiskImage \
+            -blocksize 4096 -noverify -noautofsck ./root || true
+
+          echo "=== diskutil list ==="
           diskutil list
-          sudo diskutil enableownership /Volumes/System
-          sudo mount -urw /Volumes/System
-          ls /Volumes/System/System/Library/Caches/com.apple.dyld/
+
+          echo "=== /Volumes content ==="
+          ls -la /Volumes/
+
+      - name: Ensure System volume is RW
+        run: |
+          set -e
+          # Если /Volumes/System нет — пробуем найти APFS System том
+          if [ ! -d /Volumes/System ]; then
+            echo "=== /Volumes/System missing, searching ==="
+            diskutil list
+            echo "=== Available volumes ==="
+            ls -la /Volumes/
+            exit 1
+          fi
+
+          echo "=== enabling ownership ==="
+          sudo diskutil enableownership /Volumes/System || true
+
+          echo "=== remounting RW ==="
+          sudo mount -urw /Volumes/System || true
+
+          echo "=== dyld cache ==="
+          ls -la /Volumes/System/System/Library/Caches/com.apple.dyld/ || {
+            echo "ERROR: dyld directory missing"
+            exit 1
+          }
 
       - name: Patch dyld_shared_cache_arm64e
         run: |
-          sudo ./patcher/inferno_fs_patcher \
-            /Volumes/System/System/Library/Caches/com.apple.dyld/dyld_shared_cache_arm64e
+          set -e
+          PATCHER="$GITHUB_WORKSPACE/patcher/inferno_fs_patcher"
+          TARGET="/Volumes/System/System/Library/Caches/com.apple.dyld/dyld_shared_cache_arm64e"
+
+          echo "Patcher: $PATCHER"
+          file "$PATCHER"
+          echo "Target: $TARGET"
+          ls -lh "$TARGET"
+
+          sudo "$PATCHER" "$TARGET"
 
       - name: Unmount and repack
         run: |
-          sudo hdiutil detach /Volumes/System
+          set -e
+          echo "=== Unmounting ==="
+          sudo hdiutil detach /Volumes/System || \
+            sudo hdiutil detach -force /Volumes/System || \
+            echo "WARN: detach failed, continuing anyway"
+
+          cd /tmp/megadl
+
+          echo "=== Repacking ==="
           tar --sparse -czf /tmp/iphone-patched.tar.gz \
             root firmware syscfg ctrl_bits nvram sep_nvram effaceable panic_log root_ticket.der
+
           ls -lh /tmp/iphone-patched.tar.gz
 
-      - name: Upload to MEGA
-        env:
-          MEGA_EMAIL: ${{ secrets.MEGA_EMAIL }}
-          MEGA_PASSWORD: ${{ secrets.MEGA_PASSWORD }}
+          SIZE=$(stat -f%z /tmp/iphone-patched.tar.gz)
+          if [ "$SIZE" -lt 1000000000 ]; then
+            echo "ERROR: repacked archive too small: $SIZE bytes"
+            exit 1
+          fi
+
+      - name: Upload result as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: iphone-patched
+          path: /tmp/iphone-patched.tar.gz
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Show MEGAcmd logs on failure
+        if: failure()
         run: |
-          MEGA_BIN=/tmp/MEGAcmd_app/MEGAcmd.app/Contents/MacOS
-          "$MEGA_BIN/mega-login" "$MEGA_EMAIL" "$MEGA_PASSWORD"
-          "$MEGA_BIN/mega-put" /tmp/iphone-patched.tar.gz /iphone-patched.tar.gz
-          "$MEGA_BIN/mega-ls" /
+          echo "=== ~/.megaCmd ==="
+          ls -la ~/.megaCmd/ 2>/dev/null || echo "no .megaCmd"
+          echo "=== megacmdserver.log ==="
+          cat ~/.megaCmd/megacmdserver.log 2>/dev/null || echo "no log"
+          echo "=== /Volumes ==="
+          ls -la /Volumes/ 2>/dev/null
+          echo "=== diskutil list ==="
+          diskutil list 2>/dev/null
