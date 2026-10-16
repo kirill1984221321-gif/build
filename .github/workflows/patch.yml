@@ -10,46 +10,41 @@ jobs:
     steps:
       - name: Show environment
         run: |
-          echo "=== Disk space ==="
           df -h
-          echo "=== Working dir ==="
           pwd
-          ls -la
+          sw_vers
 
       - name: Download pre-built patcher from release
         run: |
           set -e
           mkdir -p patcher
+          cd patcher
+
           for i in 1 2 3; do
-            curl -fL --retry 3 --retry-delay 5 \
-              -o patcher/inferno_fs_patcher.zip \
-              https://github.com/kirill1984221321-gif/build/releases/download/1/inferno_fs_patcher.zip && break
-            echo "Attempt $i failed, waiting 5s..."
+            curl -fL --retry 3 --retry-delay 5 -o inferno_fs_patcher.zip \
+              "https://github.com/kirill1984221321-gif/build/releases/download/1/inferno_fs_patcher.zip" && break
+            echo "curl attempt $i failed, retry in 5s"
             sleep 5
           done
-          cd patcher
-          unzip -o inferno_fs_patcher.zip
 
-          echo "=== Extracted files ==="
+          unzip -o inferno_fs_patcher.zip
+          echo "=== Extracted ==="
           ls -la
 
-          # Ищем бинарник в корне или во вложенной папке
           PATCHER_BIN=$(find . -name inferno_fs_patcher -type f | head -1)
           if [ -z "$PATCHER_BIN" ]; then
-            echo "ERROR: inferno_fs_patcher binary not found in archive"
+            echo "ERROR: inferno_fs_patcher not found in archive"
             find . -type f
             exit 1
           fi
-          echo "Found patcher: $PATCHER_BIN"
+          echo "Found: $PATCHER_BIN"
 
-          # Копируем только если путь отличается
           if [ "$PATCHER_BIN" != "./inferno_fs_patcher" ]; then
             cp -f "$PATCHER_BIN" ./inferno_fs_patcher
           fi
 
-          file ./inferno_fs_patcher || true
           chmod +x ./inferno_fs_patcher
-          echo "=== Final patcher ==="
+          file ./inferno_fs_patcher || true
           ls -lh ./inferno_fs_patcher
 
       - name: Install megatools
@@ -62,14 +57,15 @@ jobs:
           set -e
           mkdir -p /tmp/megadl
           cd /tmp/megadl
+
           MEGA_URL="https://mega.nz/file/TaBHyA6J#SiPWdjPBg9DJCl4m5mU3PKejB4Ot3-XXEVHRwDMAdBc"
 
           for i in 1 2 3; do
-            echo "=== Attempt $i: megadl ==="
+            echo "=== megadl attempt $i ==="
             if megadl "$MEGA_URL"; then
               break
             fi
-            echo "megadl failed, waiting 15s before retry..."
+            echo "megadl failed, retry in 15s"
             sleep 15
           done
 
@@ -79,33 +75,32 @@ jobs:
           if [ ! -f iphone-save.tar.gz ]; then
             FOUND=$(ls *.tar.gz 2>/dev/null | head -1)
             if [ -z "$FOUND" ]; then
-              echo "ERROR: no .tar.gz file found after megadl"
+              echo "ERROR: no .tar.gz after megadl"
               ls -la
               exit 1
             fi
             mv "$FOUND" iphone-save.tar.gz
           fi
 
-          ls -lh iphone-save.tar.gz
-
           SIZE=$(stat -f%z iphone-save.tar.gz)
           echo "Archive size: $SIZE bytes"
           if [ "$SIZE" -lt 1000000000 ]; then
-            echo "ERROR: archive smaller than 1GB, likely corrupted"
+            echo "ERROR: archive smaller than 1GB, corrupted"
             exit 1
           fi
 
-          echo "=== Extracting archive ==="
-          tar --sparse -xzf iphone-save.tar.gz
+          echo "=== Extracting archive (BSD tar, auto sparse) ==="
+          tar -xzf iphone-save.tar.gz
 
           echo "=== Files after extract ==="
           ls -lh
 
           if [ ! -f root ]; then
-            echo "ERROR: root file not found after extraction"
+            echo "ERROR: root not found after extraction"
             exit 1
           fi
-          echo "root found: $(ls -lh root)"
+          echo "root logical size: $(ls -lh root)"
+          echo "root disk usage:  $(du -h root)"
 
       - name: Mount APFS root
         run: |
@@ -114,35 +109,40 @@ jobs:
 
           echo "=== Attaching raw image ==="
           hdiutil attach -imagekey diskimage-class=CRawDiskImage \
-            -blocksize 4096 -noverify -noautofsck ./root || true
+            -blocksize 4096 -noverify -noautofsck ./root
 
           echo "=== diskutil list ==="
           diskutil list
 
-          echo "=== /Volumes content ==="
+          echo "=== /Volumes ==="
           ls -la /Volumes/
 
       - name: Ensure System volume is RW
         run: |
           set -e
           if [ ! -d /Volumes/System ]; then
-            echo "=== /Volumes/System missing, searching ==="
+            echo "ERROR: /Volumes/System not mounted"
             diskutil list
             ls -la /Volumes/
             exit 1
           fi
 
-          echo "=== enabling ownership ==="
+          echo "=== enableownership ==="
           sudo diskutil enableownership /Volumes/System || true
 
-          echo "=== remounting RW ==="
+          echo "=== remount RW ==="
           sudo mount -urw /Volumes/System || true
 
-          echo "=== dyld cache ==="
-          ls -la /Volumes/System/System/Library/Caches/com.apple.dyld/ || {
-            echo "ERROR: dyld directory missing"
+          echo "=== dyld cache dir ==="
+          if [ ! -d /Volumes/System/System/Library/Caches/com.apple.dyld ]; then
+            echo "ERROR: dyld dir missing on live System volume"
+            echo "=== snapshots ==="
+            diskutil apfs listSnapshots /Volumes/System 2>/dev/null || true
+            echo "=== /Volumes/System content ==="
+            ls -la /Volumes/System/
             exit 1
-          }
+          fi
+          ls -la /Volumes/System/System/Library/Caches/com.apple.dyld/
 
       - name: Patch dyld_shared_cache_arm64e
         run: |
@@ -152,34 +152,37 @@ jobs:
 
           echo "Patcher: $PATCHER"
           file "$PATCHER"
-          echo "Target: $TARGET"
+          echo "Target:  $TARGET"
           ls -lh "$TARGET"
 
           sudo "$PATCHER" "$TARGET"
 
-      - name: Unmount and repack
+          echo "=== Patcher done ==="
+
+      - name: Unmount
         run: |
-          set -e
-          echo "=== Unmounting ==="
           sudo hdiutil detach /Volumes/System || \
             sudo hdiutil detach -force /Volumes/System || \
-            echo "WARN: detach failed, continuing anyway"
+            echo "WARN: detach failed, continuing"
 
+      - name: Repack result
+        run: |
+          set -e
           cd /tmp/megadl
 
-          echo "=== Repacking ==="
-          tar --sparse -czf /tmp/iphone-patched.tar.gz \
+          tar -czf /tmp/iphone-patched.tar.gz \
             root firmware syscfg ctrl_bits nvram sep_nvram effaceable panic_log root_ticket.der
 
           ls -lh /tmp/iphone-patched.tar.gz
 
           SIZE=$(stat -f%z /tmp/iphone-patched.tar.gz)
+          echo "Repacked size: $SIZE bytes"
           if [ "$SIZE" -lt 1000000000 ]; then
-            echo "ERROR: repacked archive too small: $SIZE bytes"
+            echo "ERROR: repacked archive too small"
             exit 1
           fi
 
-      - name: Upload result as artifact
+      - name: Upload as artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -187,6 +190,29 @@ jobs:
           path: /tmp/iphone-patched.tar.gz
           retention-days: 30
           if-no-files-found: warn
+
+      - name: Install rclone (optional MEGA upload)
+        if: success()
+        run: brew install rclone
+
+      - name: Upload to MEGA via rclone (optional)
+        if: success()
+        env:
+          MEGA_EMAIL: ${{ secrets.MEGA_EMAIL }}
+          MEGA_PASSWORD: ${{ secrets.MEGA_PASSWORD }}
+        run: |
+          set -e
+          if [ -z "$MEGA_EMAIL" ] || [ -z "$MEGA_PASSWORD" ]; then
+            echo "MEGA secrets not set, skipping upload"
+            exit 0
+          fi
+          OBSCURED=$(rclone obscure "$MEGA_PASSWORD")
+          mkdir -p ~/.config/rclone
+          printf '[mega]\ntype = mega\nuser = %s\npass = %s\n' \
+            "$MEGA_EMAIL" "$OBSCURED" > ~/.config/rclone/rclone.conf
+          rclone copy /tmp/iphone-patched.tar.gz mega:/
+          echo "=== files on MEGA ==="
+          rclone ls mega:/
 
       - name: Show logs on failure
         if: failure()
@@ -197,3 +223,5 @@ jobs:
           diskutil list 2>/dev/null || true
           echo "=== /tmp/megadl ==="
           ls -la /tmp/megadl/ 2>/dev/null || true
+          echo "=== patcher dir ==="
+          ls -la "$GITHUB_WORKSPACE/patcher/" 2>/dev/null || true
