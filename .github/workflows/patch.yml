@@ -15,44 +15,27 @@ jobs:
             https://github.com/kirill1984221321-gif/build/releases/download/1/inferno_fs_patcher.zip
           cd patcher
           unzip -o inferno_fs_patcher.zip
-          ls -lh
           file inferno_fs_patcher
           chmod +x inferno_fs_patcher
 
-      - name: Install MEGAcmd
+      - name: Install MEGAcmd from DMG
         run: |
-          brew install megacmd
-          echo "/opt/homebrew/bin" >> $GITHUB_PATH
-          ls -la /opt/homebrew/bin/ | grep -i mega || true
-          ls -la /opt/homebrew/Cellar/megacmd/*/bin/ || true
-
-      - name: Verify MEGAcmd
-        run: |
-          export PATH="/opt/homebrew/bin:$PATH"
-          which mega-cmd || echo "no mega-cmd"
-          which mega-login || echo "no mega-login"
-          which mega-get || echo "no mega-get"
-          which mega-put || echo "no mega-put"
-          ls /opt/homebrew/Cellar/megacmd/*/bin/ 2>/dev/null || echo "no Cellar bin"
-          ls /opt/homebrew/bin/ | grep mega || echo "nothing in /opt/homebrew/bin"
+          curl -fL -o /tmp/MEGAcmdSetup.dmg https://mega.nz/MEGAcmdSetup.dmg
+          hdiutil attach /tmp/MEGAcmdSetup.dmg -nobrowse -mountpoint /tmp/megacmd
+          sudo cp /tmp/megacmd/MEGAcmd.app/Contents/MacOS/mega-* /usr/local/bin/
+          sudo chmod +x /usr/local/bin/mega-*
+          hdiutil detach /tmp/megacmd
+          which mega-login mega-get mega-put mega-cmd
+          mega-cmd --version
 
       - name: Download iphone-save from MEGA
         env:
           MEGA_EMAIL: ${{ secrets.MEGA_EMAIL }}
           MEGA_PASSWORD: ${{ secrets.MEGA_PASSWORD }}
         run: |
-          export PATH="/opt/homebrew/bin:$PATH"
-
-          # Если mega-login нет — использовать mega-cmd с командой
-          if command -v mega-login >/dev/null 2>&1; then
-            mega-login "$MEGA_EMAIL" "$MEGA_PASSWORD"
-            mega-get /iphone-save.tar.gz
-          else
-            mega-cmd -c "login $MEGA_EMAIL $MEGA_PASSWORD"
-            mega-cmd -c "get /iphone-save.tar.gz"
-          fi
-
-          ls -lh
+          mega-login "$MEGA_EMAIL" "$MEGA_PASSWORD"
+          mega-get /iphone-save.tar.gz
+          ls -lh iphone-save.tar.gz
           tar --sparse -xzf iphone-save.tar.gz
           ls -lh root
 
@@ -81,12 +64,6 @@ jobs:
           MEGA_EMAIL: ${{ secrets.MEGA_EMAIL }}
           MEGA_PASSWORD: ${{ secrets.MEGA_PASSWORD }}
         run: |
-          export PATH="/opt/homebrew/bin:$PATH"
-
-          if command -v mega-put >/dev/null 2>&1; then
-            mega-put /tmp/iphone-patched.tar.gz /iphone-patched.tar.gz
-            mega-ls /
-          else
-            mega-cmd -c "put /tmp/iphone-patched.tar.gz /iphone-patched.tar.gz"
-            mega-cmd -c "ls /"
-          fi
+          mega-login "$MEGA_EMAIL" "$MEGA_PASSWORD"
+          mega-put /tmp/iphone-patched.tar.gz /iphone-patched.tar.gz
+          mega-ls /
