@@ -15,7 +15,6 @@ jobs:
           echo "=== Working dir ==="
           pwd
           ls -la
-          echo "=== GITHUB_WORKSPACE=$GITHUB_WORKSPACE ==="
 
       - name: Download pre-built patcher from release
         run: |
@@ -30,8 +29,10 @@ jobs:
           done
           cd patcher
           unzip -o inferno_fs_patcher.zip
+
           echo "=== Extracted files ==="
           ls -la
+
           # Ищем бинарник в корне или во вложенной папке
           PATCHER_BIN=$(find . -name inferno_fs_patcher -type f | head -1)
           if [ -z "$PATCHER_BIN" ]; then
@@ -40,9 +41,16 @@ jobs:
             exit 1
           fi
           echo "Found patcher: $PATCHER_BIN"
-          cp "$PATCHER_BIN" ./inferno_fs_patcher
-          file ./inferno_fs_patcher
+
+          # Копируем только если путь отличается
+          if [ "$PATCHER_BIN" != "./inferno_fs_patcher" ]; then
+            cp -f "$PATCHER_BIN" ./inferno_fs_patcher
+          fi
+
+          file ./inferno_fs_patcher || true
           chmod +x ./inferno_fs_patcher
+          echo "=== Final patcher ==="
+          ls -lh ./inferno_fs_patcher
 
       - name: Install megatools
         run: |
@@ -68,7 +76,6 @@ jobs:
           echo "=== Files after download ==="
           ls -lh
 
-          # Переименовать в каноничное имя, если MEGA вернула другое
           if [ ! -f iphone-save.tar.gz ]; then
             FOUND=$(ls *.tar.gz 2>/dev/null | head -1)
             if [ -z "$FOUND" ]; then
@@ -81,7 +88,6 @@ jobs:
 
           ls -lh iphone-save.tar.gz
 
-          # Проверка размера
           SIZE=$(stat -f%z iphone-save.tar.gz)
           echo "Archive size: $SIZE bytes"
           if [ "$SIZE" -lt 1000000000 ]; then
@@ -119,11 +125,9 @@ jobs:
       - name: Ensure System volume is RW
         run: |
           set -e
-          # Если /Volumes/System нет — пробуем найти APFS System том
           if [ ! -d /Volumes/System ]; then
             echo "=== /Volumes/System missing, searching ==="
             diskutil list
-            echo "=== Available volumes ==="
             ls -la /Volumes/
             exit 1
           fi
@@ -184,14 +188,12 @@ jobs:
           retention-days: 30
           if-no-files-found: warn
 
-      - name: Show MEGAcmd logs on failure
+      - name: Show logs on failure
         if: failure()
         run: |
-          echo "=== ~/.megaCmd ==="
-          ls -la ~/.megaCmd/ 2>/dev/null || echo "no .megaCmd"
-          echo "=== megacmdserver.log ==="
-          cat ~/.megaCmd/megacmdserver.log 2>/dev/null || echo "no log"
           echo "=== /Volumes ==="
-          ls -la /Volumes/ 2>/dev/null
+          ls -la /Volumes/ 2>/dev/null || true
           echo "=== diskutil list ==="
-          diskutil list 2>/dev/null
+          diskutil list 2>/dev/null || true
+          echo "=== /tmp/megadl ==="
+          ls -la /tmp/megadl/ 2>/dev/null || true
