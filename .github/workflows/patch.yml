@@ -1,0 +1,67 @@
+name: Patch InfernoFS
+
+on: workflow_dispatch
+
+jobs:
+  patch:
+    runs-on: macos-14
+    timeout-minutes: 90
+
+    steps:
+      - name: Download pre-built patcher from release
+        run: |
+          mkdir -p patcher
+          curl -L -o patcher/inferno_fs_patcher.zip \
+            https://github.com/kirill1984221321-gif/build/releases/download/1/inferno_fs_patcher.zip
+          cd patcher
+          unzip -o inferno_fs_patcher.zip
+          ls -lh
+          file inferno_fs_patcher
+          chmod +x inferno_fs_patcher
+
+      - name: Install megacmd
+        run: |
+          brew install megacmd || brew install --cask megacmd
+
+      - name: Download iphone-save from MEGA
+        env:
+          MEGA_EMAIL: ${{ secrets.MEGA_EMAIL }}
+          MEGA_PASSWORD: ${{ secrets.MEGA_PASSWORD }}
+        run: |
+          mega-login "$MEGA_EMAIL" "$MEGA_PASSWORD"
+          mkdir -p work && cd work
+          mega-get /iphone-save.tar.gz
+          ls -lh
+          tar --sparse -xzf iphone-save.tar.gz
+          ls -lh root
+
+      - name: Mount APFS root
+        run: |
+          cd work
+          hdiutil attach -imagekey diskimage-class=CRawDiskImage -blocksize 4096 -noverify -noautofsck ./root
+          diskutil list
+          sudo diskutil enableownership /Volumes/System
+          sudo mount -urw /Volumes/System
+          ls /Volumes/System/System/Library/Caches/com.apple.dyld/
+
+      - name: Patch dyld_shared_cache_arm64e
+        run: |
+          sudo ./patcher/inferno_fs_patcher \
+            /Volumes/System/System/Library/Caches/com.apple.dyld/dyld_shared_cache_arm64e
+
+      - name: Unmount and repack
+        run: |
+          sudo hdiutil detach /Volumes/System
+          cd work
+          tar --sparse -czf /tmp/iphone-patched.tar.gz \
+            root firmware syscfg ctrl_bits nvram sep_nvram effaceable panic_log root_ticket.der
+          ls -lh /tmp/iphone-patched.tar.gz
+
+      - name: Upload to MEGA
+        env:
+          MEGA_EMAIL: ${{ secrets.MEGA_EMAIL }}
+          MEGA_PASSWORD: ${{ secrets.MEGA_PASSWORD }}
+        run: |
+          mega-login "$MEGA_EMAIL" "$MEGA_PASSWORD"
+          mega-put /tmp/iphone-patched.tar.gz /iphone-patched.tar.gz
+          mega-ls /
